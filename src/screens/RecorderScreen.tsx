@@ -1,21 +1,44 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Header, PauseIcon, PlayIcon, StopIcon } from '../components';
-import { Resona, RecorderState } from '../native';
+import { Alert, Animated, Easing, StyleSheet, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { RecorderState, Resona } from '../native';
 import { finishRecording, formatTime, loadRecording, Recording, saveRecording } from '../store';
-import { C, useInterval } from '../theme';
+import { useInterval, useTheme } from '../theme';
+import { Icon } from '../ui/Icon';
+import { haptic, NavBar, s, T, Tap } from '../ui/kit';
 
-const BARS = 48;
+const BARS = 64;
 
 export function RecorderScreen({ id, onDone, onBack }: { id: string; onDone: (id: string) => void; onBack: () => void }) {
+  const t = useTheme();
+  const insets = useSafeAreaInsets();
   const [state, setState] = useState<RecorderState | null>(null);
   const [rec, setRec] = useState<Recording | null>(null);
   const [levels, setLevels] = useState<number[]>(() => new Array(BARS).fill(0));
   const stopping = useRef(false);
+  const dot = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     loadRecording(id).then(setRec);
   }, [id]);
+
+  const paused = !!state?.paused;
+  const active = state?.active ?? true;
+
+  useEffect(() => {
+    if (paused || !active) {
+      dot.setValue(0.35);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(dot, { toValue: 0.25, duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(dot, { toValue: 1, duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [paused, active, dot]);
 
   useInterval(async () => {
     const st = await Resona.getRecorderState();
@@ -24,84 +47,95 @@ export function RecorderScreen({ id, onDone, onBack }: { id: string; onDone: (id
       stopping.current = true;
       Alert.alert('Erreur d\'enregistrement', st.error);
     }
-    // Normalisation visuelle : la parole tourne autour de 0.01-0.2 en RMS.
-    const v = st.paused ? 0 : Math.min(1, Math.sqrt(st.level) * 2.2);
+    const v = st.paused ? 0 : Math.min(1, Math.sqrt(st.level) * 2.4);
     setLevels(l => [...l.slice(1), v]);
-  }, 120);
+  }, 90);
 
   const stop = async () => {
     if (stopping.current) return;
     stopping.current = true;
-    const r = await finishRecording(id);
-    if (r && r.duration < 2) {
-      Alert.alert('Enregistrement très court', 'L\'enregistrement fait moins de 2 secondes.');
-    }
+    haptic('success');
+    await finishRecording(id);
     onDone(id);
   };
 
   const togglePause = async () => {
-    if (state?.paused) await Resona.resumeRecording();
+    haptic('select');
+    if (paused) await Resona.resumeRecording();
     else await Resona.pauseRecording();
   };
 
   const saveTitle = async (title: string) => {
-    if (!rec) return;
     const fresh = (await loadRecording(id)) ?? rec;
-    fresh.title = title.trim() || rec.title;
+    if (!fresh) return;
+    fresh.title = title.trim() || fresh.title;
     await saveRecording(fresh);
     setRec(fresh);
   };
 
-  const paused = !!state?.paused;
-  const active = state?.active ?? true;
+  const elapsed = state?.elapsedSec ?? 0;
+  const mm = Math.floor(elapsed / 60);
+  const ss = Math.floor(elapsed % 60);
+  const cs = Math.floor((elapsed % 1) * 10);
 
   return (
-    <View style={{ flex: 1 }}>
-      <Header title="Enregistrement" onBack={onBack} />
-      <View style={st.body}>
+    <View style={{ flex: 1, backgroundColor: t.bg }}>
+      <NavBar backLabel="Réunions" onBack={onBack} />
+      <View style={{ paddingHorizontal: 24, marginTop: 6 }}>
         {rec ? (
           <TextInput
             defaultValue={rec.title}
             onEndEditing={e => saveTitle(e.nativeEvent.text)}
-            style={st.title}
-            placeholderTextColor={C.dim}
-            selectionColor={C.accent}
+            style={[st.title, { color: t.label }]}
+            selectionColor={t.accent}
+            multiline={false}
           />
         ) : null}
-
-        <View style={st.statusRow}>
-          <View style={[st.recDot, { backgroundColor: paused || !active ? C.dim : C.rec }]} />
-          <Text style={st.statusTxt}>{!active ? 'Arrêté' : paused ? 'En pause' : 'Enregistrement en cours'}</Text>
+        <View style={[s.row, { alignItems: 'center', gap: 8, marginTop: 6 }]}>
+          <Animated.View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: paused ? t.label3 : t.red, opacity: dot }} />
+          <T v="subhead" c={t.label2}>
+            {!active ? 'Arrêté' : paused ? 'En pause' : 'Enregistrement'}
+          </T>
         </View>
+      </View>
 
-        <Text style={st.timer}>{formatTime(state?.elapsedSec ?? 0)}</Text>
-
-        <View style={st.meter}>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <View style={[s.row, { alignItems: 'baseline' }]}>
+          <T style={[st.timer, { color: t.label }]}>
+            {String(mm).padStart(2, '0')}:{String(ss).padStart(2, '0')}
+          </T>
+          <T style={[st.timerSmall, { color: t.label2 }]}>,{cs}</T>
+        </View>
+        <View style={[s.row, { alignItems: 'center', height: 150, gap: 3, marginTop: 34 }]}>
           {levels.map((v, i) => (
             <View
               key={i}
-              style={[st.bar, { height: 6 + v * 110, backgroundColor: paused ? C.dim : i > BARS - 4 ? C.rec : C.accent, opacity: 0.35 + (i / BARS) * 0.65 }]}
+              style={{
+                width: 3,
+                height: 4 + v * 140,
+                borderRadius: 2,
+                backgroundColor: paused ? t.label3 : t.red,
+                opacity: 0.25 + 0.75 * (i / BARS),
+              }}
             />
           ))}
         </View>
-
-        <Text style={st.hint}>
-          Vous pouvez verrouiller le téléphone : l'enregistrement continue. Une notification permet de le mettre en pause ou
-          de l'arrêter.
-        </Text>
+        <T v="footnote" c={t.label2} style={{ textAlign: 'center', marginTop: 34, paddingHorizontal: 40, lineHeight: 18 }}>
+          Vous pouvez verrouiller le téléphone, l'enregistrement continue. La notification permet aussi de le mettre en pause.
+        </T>
       </View>
 
-      <View style={st.controls}>
-        <Pressable onPress={togglePause} style={({ pressed }) => [st.ctrl, pressed && { opacity: 0.7 }]} disabled={!active}>
-          {paused ? <PlayIcon size={22} color={C.text} /> : <PauseIcon size={22} color={C.text} />}
-          <Text style={st.ctrlTxt}>{paused ? 'Reprendre' : 'Pause'}</Text>
-        </Pressable>
-        <Pressable onPress={stop} style={({ pressed }) => [st.stop, pressed && { transform: [{ scale: 0.95 }] }]}>
-          <StopIcon size={28} />
-        </Pressable>
-        <View style={st.ctrl}>
-          <Text style={[st.ctrlTxt, { marginTop: 0 }]}>Terminer</Text>
-          <Text style={[st.ctrlTxt, { color: C.dim, fontSize: 11 }]}>appuyez ■</Text>
+      <View style={[s.row, { alignItems: 'center', justifyContent: 'center', gap: 46, paddingBottom: insets.bottom + 40 }]}>
+        <Tap onPress={togglePause} scale={0.9} hapticKind={null} disabled={!active} style={[s.center, { width: 58, height: 58, borderRadius: 29, backgroundColor: t.fill }]}>
+          <Icon name={paused ? 'play' : 'pause'} size={24} color={t.label} />
+        </Tap>
+        <Tap onPress={stop} scale={0.9} hapticKind={null} style={[s.center, { width: 80, height: 80, borderRadius: 40, borderWidth: 4, borderColor: t.dark ? '#5A5A5E' : '#C7C7CC' }]}>
+          <View style={{ width: 30, height: 30, borderRadius: 7, backgroundColor: t.red }} />
+        </Tap>
+        <View style={{ width: 58 }}>
+          <T v="caption" c={t.label2} style={{ textAlign: 'center' }}>
+            {formatTime(elapsed)}
+          </T>
         </View>
       </View>
     </View>
@@ -109,26 +143,7 @@ export function RecorderScreen({ id, onDone, onBack }: { id: string; onDone: (id
 }
 
 const st = StyleSheet.create({
-  body: { flex: 1, alignItems: 'center', paddingHorizontal: 24, paddingTop: 12 },
-  title: {
-    color: C.text,
-    fontSize: 17,
-    fontWeight: '600',
-    textAlign: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: C.border,
-    alignSelf: 'stretch',
-    paddingVertical: 8,
-  },
-  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 36 },
-  recDot: { width: 10, height: 10, borderRadius: 5 },
-  statusTxt: { color: C.sub, fontWeight: '600' },
-  timer: { color: C.text, fontSize: 64, fontWeight: '200', marginTop: 8, fontVariant: ['tabular-nums'] },
-  meter: { flexDirection: 'row', alignItems: 'center', height: 130, gap: 3, marginTop: 28 },
-  bar: { width: 4, borderRadius: 2 },
-  hint: { color: C.dim, textAlign: 'center', marginTop: 36, lineHeight: 20 },
-  controls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', paddingBottom: 48, paddingHorizontal: 24 },
-  ctrl: { width: 90, alignItems: 'center', gap: 8 },
-  ctrlTxt: { color: C.sub, fontSize: 13, marginTop: 4 },
-  stop: { width: 84, height: 84, borderRadius: 42, backgroundColor: C.rec, alignItems: 'center', justifyContent: 'center', elevation: 6 },
+  title: { fontSize: 28, fontWeight: '700', paddingVertical: 4, paddingHorizontal: 0 },
+  timer: { fontSize: 76, fontWeight: '200', fontVariant: ['tabular-nums'], letterSpacing: -1 },
+  timerSmall: { fontSize: 40, fontWeight: '200', fontVariant: ['tabular-nums'] },
 });

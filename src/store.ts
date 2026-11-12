@@ -1,5 +1,6 @@
 import { getPaths, Resona } from './native';
 import { DIARIZATION_PACK, isPackInstalled, modelPath, whisperPack, WhisperSize } from './models';
+import { SENSITIVITY_TAU, Voice } from './grouping';
 
 export type Segment = { start: number; end: number; speaker: number; text: string };
 
@@ -12,8 +13,12 @@ export type Recording = {
   duration: number;
   status: RecordingStatus;
   error?: string | null;
-  speakers: Record<string, string>; // index de voix -> nom donné par l'utilisateur
+  speakers: Record<string, string>; // clé de personne -> nom donné par l'utilisateur
   segments?: Segment[];
+  voices?: Voice[]; // empreinte vocale de chaque personne détectée
+  people?: number; // nombre de participants demandé à l'analyse (0 = auto)
+  reduceTo?: number; // regroupement instantané demandé ensuite (0 = aucun)
+  merges?: [number, number][]; // fusions manuelles « c'est la même personne »
   transcribed?: boolean;
   engine?: 'local' | 'remote';
 };
@@ -38,8 +43,8 @@ export const DEFAULT_SETTINGS: Settings = {
   remoteKey: '',
 };
 
-// Seuils de clustering validés sur des tests (empreintes TitaNet) : plus haut = moins de voix distinctes.
-const THRESHOLDS: Record<Settings['sensitivity'], number> = { fewer: 0.75, normal: 0.6, more: 0.45 };
+// Seuil de regroupement des voix (similarité d'empreintes) : plus bas = moins de personnes distinctes.
+const THRESHOLDS: Record<Settings['sensitivity'], number> = SENSITIVITY_TAU;
 
 // ---------- Chemins ----------
 
@@ -74,8 +79,8 @@ export async function saveSettings(s: Settings) {
 
 // ---------- Enregistrements ----------
 
-export function speakerName(rec: Recording, speaker: number) {
-  return rec.speakers[String(speaker)] || `Voix ${String.fromCharCode(65 + (speaker % 26))}${speaker >= 26 ? Math.floor(speaker / 26) : ''}`;
+export function defaultVoiceName(index: number) {
+  return `Voix ${String.fromCharCode(65 + (index % 26))}${index >= 26 ? Math.floor(index / 26) : ''}`;
 }
 
 export async function saveRecording(rec: Recording) {
@@ -171,6 +176,9 @@ export async function syncProcessingResult(r: Recording): Promise<Recording> {
 
 function applyResult(r: Recording, result: any, engine: 'local' | 'remote') {
   r.segments = result.segments;
+  r.voices = result.voices;
+  r.reduceTo = 0;
+  r.merges = [];
   r.transcribed = !!result.transcribed;
   r.engine = engine;
   r.status = 'done';
@@ -186,7 +194,7 @@ function applyResult(r: Recording, result: any, engine: 'local' | 'remote') {
 
 export class MissingModelsError extends Error {}
 
-export async function startLocalProcessing(r: Recording, s: Settings) {
+export async function startLocalProcessing(r: Recording, s: Settings, people?: number) {
   if (!(await isPackInstalled(DIARIZATION_PACK))) {
     throw new MissingModelsError('Le modèle de reconnaissance des voix doit d\'abord être téléchargé (Réglages).');
   }
@@ -214,12 +222,13 @@ export async function startLocalProcessing(r: Recording, s: Settings) {
     whisperDecoder: whisper?.dec ?? null,
     whisperTokens: whisper?.tok ?? null,
     language: s.language === 'auto' ? '' : s.language,
-    numSpeakers: s.numSpeakers,
+    numSpeakers: people ?? s.numSpeakers,
     threshold: THRESHOLDS[s.sensitivity],
     threads: Math.max(1, Math.min(4, paths.cpuCount - 1)),
   });
   r.status = 'processing';
   r.engine = 'local';
+  r.people = people ?? s.numSpeakers;
   r.error = null;
   await saveRecording(r);
 }
@@ -230,7 +239,7 @@ export async function startLocalProcessing(r: Recording, s: Settings) {
  *   En-tête Authorization: Bearer <clé> si une clé est renseignée.
  *   Réponse JSON : { "segments": [ { "start": 0.0, "end": 3.2, "speaker": "SPEAKER_00", "text": "..." } ] }
  */
-export async function runRemoteProcessing(r: Recording, s: Settings): Promise<Recording> {
+export async function runRemoteProcessing(r: Recording, s: Settings, people?: number): Promise<Recording> {
   if (!s.remoteUrl) throw new Error('Aucune adresse de serveur configurée (Réglages).');
   r.status = 'processing';
   r.engine = 'remote';
@@ -240,7 +249,8 @@ export async function runRemoteProcessing(r: Recording, s: Settings): Promise<Re
     const form = new FormData();
     form.append('audio', { uri: `file://${await wavPath(r.id)}`, type: 'audio/wav', name: `${r.id}.wav` } as any);
     form.append('language', s.language);
-    form.append('num_speakers', String(s.numSpeakers));
+    form.append('num_speakers', String(people ?? s.numSpeakers));
+    r.people = people ?? s.numSpeakers;
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (s.remoteKey) headers.Authorization = `Bearer ${s.remoteKey}`;
     const res = await fetch(s.remoteUrl, { method: 'POST', body: form, headers });
@@ -269,12 +279,4 @@ export function formatTime(sec: number) {
   const m = Math.floor((s % 3600) / 60);
   const ss = String(s % 60).padStart(2, '0');
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
-}
-
-export function transcriptText(r: Recording) {
-  const lines = [r.title, ''];
-  for (const s of r.segments ?? []) {
-    lines.push(`[${formatTime(s.start)}] ${speakerName(r, s.speaker)} : ${s.text || '…'}`);
-  }
-  return lines.join('\n');
 }

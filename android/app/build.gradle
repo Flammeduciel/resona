@@ -82,8 +82,8 @@ android {
         applicationId "com.resona"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "0.1.1"
+        versionCode 3
+        versionName "0.2.0"
     }
     signingConfigs {
         debug {
@@ -101,6 +101,8 @@ android {
             // Caution! In production, you need to generate your own keystore file.
             // see https://reactnative.dev/docs/signed-apk-android.
             signingConfig signingConfigs.debug
+            // build spéciale pour les captures d'écran automatisées (accès aux fichiers via adb run-as)
+            debuggable project.hasProperty("screenshotBuild")
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }

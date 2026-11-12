@@ -20,9 +20,9 @@ export type ProcessingState = {
 
 export type DownloadState = { bytes: number; total: number; done: boolean; error: string | null };
 
-export type PlayerState = { loaded: boolean; playing: boolean; position: number; duration: number };
+export type PlayerState = { loaded: boolean; playing: boolean; position: number; duration: number; ranges?: boolean; speed?: number };
 
-export type Paths = { base: string; recordings: string; models: string; cpuCount: number };
+export type Paths = { base: string; recordings: string; models: string; exports: string; cpuCount: number; sdk: number };
 
 export type ProcessingOptions = {
   id: string;
@@ -69,6 +69,14 @@ type ResonaNative = {
   playerSeek(sec: number): Promise<boolean>;
   playerState(): Promise<PlayerState>;
   playerRelease(): Promise<boolean>;
+  playerSetSpeed(speed: number): Promise<boolean>;
+  playerPlayRanges(ranges: [number, number][]): Promise<boolean>;
+  playerClearRanges(): Promise<boolean>;
+
+  exportAudio(wavPath: string, outPath: string, ranges: [number, number][] | null): Promise<string>;
+  shareFiles(paths: string[], mime: string, title: string): Promise<boolean>;
+  saveToDownloads(path: string, displayName: string, mime: string): Promise<string>;
+  haptic(kind: 'tap' | 'select' | 'success' | 'heavy'): void;
 };
 
 export const Resona: ResonaNative = NativeModules.Resona;

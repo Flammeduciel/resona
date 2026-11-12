@@ -1,238 +1,183 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Button, Chip, Header, ProgressBar } from '../components';
-import {
-  deletePack,
-  DIARIZATION_PACK,
-  ModelPack,
-  PackProgress,
-  packProgress,
-  packSize,
-  startPackDownload,
-  WHISPER_OPTIONS,
-  whisperPack,
-} from '../models';
+import { Alert, ScrollView, TextInput, View } from 'react-native';
+import { deletePack, DIARIZATION_PACK, ModelPack, PackProgress, packProgress, packSize, startPackDownload, WHISPER_OPTIONS, whisperPack } from '../models';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, Settings } from '../store';
-import { C, formatBytes, useInterval } from '../theme';
+import { formatBytes, useInterval, useTheme } from '../theme';
+import { Icon } from '../ui/Icon';
+import { Button, Group, haptic, NavBar, Row, s, T, Tap } from '../ui/kit';
 
 export function SettingsScreen({ onBack }: { onBack: () => void }) {
-  const [s, setS] = useState<Settings>(DEFAULT_SETTINGS);
+  const t = useTheme();
+  const [st, setSt] = useState<Settings>(DEFAULT_SETTINGS);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     loadSettings().then(v => {
-      setS(v);
+      setSt(v);
       setLoaded(true);
     });
   }, []);
 
   const update = (patch: Partial<Settings>) => {
-    const next = { ...s, ...patch };
-    setS(next);
+    const next = { ...st, ...patch };
+    setSt(next);
     saveSettings(next);
   };
 
-  if (!loaded) return <View style={{ flex: 1 }} />;
+  if (!loaded) return <View style={{ flex: 1, backgroundColor: t.bg }} />;
+  const local = st.engine === 'local';
 
   return (
-    <View style={{ flex: 1 }}>
-      <Header title="Réglages" onBack={onBack} />
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60, gap: 22 }} keyboardShouldPersistTaps="handled">
-        <Section title="Moteur d'analyse">
-          <Row>
-            <Chip label="Sur le téléphone" active={s.engine === 'local'} onPress={() => update({ engine: 'local' })} />
-            <Chip label="Serveur externe" active={s.engine === 'remote'} onPress={() => update({ engine: 'remote' })} />
-          </Row>
-          <Text style={st.help}>
-            {s.engine === 'local'
-              ? 'Tout reste sur votre téléphone, sans connexion (après téléchargement des modèles).'
-              : 'L\'audio est envoyé à votre serveur, qui renvoie les voix et la transcription.'}
-          </Text>
-        </Section>
+    <View style={{ flex: 1, backgroundColor: t.bg }}>
+      <NavBar backLabel="Réunions" onBack={onBack} />
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 60, gap: 28 }} keyboardShouldPersistTaps="handled">
+        <T v="largeTitle" style={{ marginLeft: 4 }}>
+          Réglages
+        </T>
 
-        {s.engine === 'local' ? (
+        <Group
+          header="Analyse"
+          footer={local ? 'Tout reste sur votre téléphone, sans connexion (une fois les modèles téléchargés).' : 'L\'audio est envoyé à votre serveur, qui renvoie les voix et la transcription.'}>
+          <Row title="Sur le téléphone" subtitle="Privé, hors ligne" icon="mic" iconBg="#34C759" checked={local} onPress={() => update({ engine: 'local' })} />
+          <Row title="Serveur externe" subtitle="Plus rapide sur les longues réunions" icon="share" iconBg="#007AFF" checked={!local} onPress={() => update({ engine: 'remote' })} />
+        </Group>
+
+        {local ? (
           <>
-            <Section title="Modèles locaux">
+            <Group header="Modèles" footer="Téléchargés une seule fois, de préférence en Wi-Fi.">
               <PackRow pack={DIARIZATION_PACK} />
-              {s.whisper !== 'none' ? <PackRow pack={whisperPack(s.whisper)} /> : null}
-            </Section>
-
-            <Section title="Transcription (Whisper)">
-              <Row>
-                <Chip label="Désactivée" active={s.whisper === 'none'} onPress={() => update({ whisper: 'none' })} />
-                {WHISPER_OPTIONS.map(w => (
-                  <Chip
-                    key={w}
-                    label={`${w[0].toUpperCase()}${w.slice(1)} · ${formatBytes(packSize(whisperPack(w)))}`}
-                    active={s.whisper === w}
-                    onPress={() => update({ whisper: w })}
-                  />
-                ))}
-              </Row>
-              <Text style={st.help}>
-                {s.whisper === 'none'
-                  ? 'Seuls les tours de parole (qui parle quand) seront calculés. Très rapide.'
-                  : whisperPack(s.whisper).description + ' Une réunion d\'une heure peut demander plusieurs minutes d\'analyse.'}
-              </Text>
-            </Section>
+              {st.whisper !== 'none' ? <PackRow pack={whisperPack(st.whisper)} /> : null}
+            </Group>
+            <Group header="Transcription" footer={st.whisper === 'none' ? 'Seuls les tours de parole seront calculés : très rapide.' : 'Comptez quelques minutes d\'analyse par tranche de 10 minutes de réunion avec Base.'}>
+              {WHISPER_OPTIONS.map(w => {
+                const p = whisperPack(w);
+                return <Row key={w} title={p.label} subtitle={`${p.description} ${formatBytes(packSize(p))}`} checked={st.whisper === w} onPress={() => update({ whisper: w })} />;
+              })}
+              <Row title="Désactivée" subtitle="Uniquement qui parle et quand" checked={st.whisper === 'none'} onPress={() => update({ whisper: 'none' })} />
+            </Group>
           </>
         ) : (
-          <Section title="Serveur">
-            <TextInput
-              value={s.remoteUrl}
-              onChangeText={t => update({ remoteUrl: t.trim() })}
-              placeholder="https://mon-serveur.com/analyze"
-              placeholderTextColor={C.dim}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-              style={st.input}
-            />
-            <TextInput
-              value={s.remoteKey}
-              onChangeText={t => update({ remoteKey: t.trim() })}
-              placeholder="Clé d'API (facultatif)"
-              placeholderTextColor={C.dim}
-              autoCapitalize="none"
-              autoCorrect={false}
-              secureTextEntry
-              style={st.input}
-            />
-            <Text style={st.help}>
-              Le serveur reçoit le fichier WAV (champ « audio ») et doit répondre en JSON : {'{'} "segments": [{'{'} "start",
-              "end", "speaker", "text" {'}'}] {'}'}. Voir le dossier server/ du projet.
-            </Text>
-          </Section>
+          <Group header="Serveur" footer={'Le serveur reçoit le fichier WAV (champ « audio ») et répond en JSON : { "segments": [{ "start", "end", "speaker", "text" }] }. Un serveur prêt à l\'emploi est fourni dans le dossier server/ du projet.'}>
+            <Field value={st.remoteUrl} placeholder="https://mon-serveur.com/analyze" onChange={v => update({ remoteUrl: v.trim() })} />
+            <Field value={st.remoteKey} placeholder="Clé d'API (facultatif)" secure onChange={v => update({ remoteKey: v.trim() })} />
+          </Group>
         )}
 
-        <Section title="Langue de la réunion">
-          <Row>
-            <Chip label="Français" active={s.language === 'fr'} onPress={() => update({ language: 'fr' })} />
-            <Chip label="Anglais" active={s.language === 'en'} onPress={() => update({ language: 'en' })} />
-            <Chip label="Détection auto" active={s.language === 'auto'} onPress={() => update({ language: 'auto' })} />
-          </Row>
-        </Section>
+        <Group header="Langue des réunions">
+          <Row title="Français" checked={st.language === 'fr'} onPress={() => update({ language: 'fr' })} />
+          <Row title="Anglais" checked={st.language === 'en'} onPress={() => update({ language: 'en' })} />
+          <Row title="Détection automatique" checked={st.language === 'auto'} onPress={() => update({ language: 'auto' })} />
+        </Group>
 
-        <Section title="Nombre de participants">
-          <Row>
-            <Chip label="Auto" active={s.numSpeakers === 0} onPress={() => update({ numSpeakers: 0 })} />
-            {[2, 3, 4, 5, 6, 8].map(n => (
-              <Chip key={n} label={String(n)} active={s.numSpeakers === n} onPress={() => update({ numSpeakers: n })} />
-            ))}
-          </Row>
-          <Text style={st.help}>Si vous connaissez le nombre de personnes, l'indiquer améliore nettement le résultat.</Text>
-        </Section>
+        <Group header="Participants par défaut" footer="Proposé au lancement de chaque analyse. Indiquer le bon nombre rend la reconnaissance des voix bien plus fiable.">
+          <View style={[s.row, { flexWrap: 'wrap', gap: 8, padding: 14 }]}>
+            {[0, 2, 3, 4, 5, 6].map(n => {
+              const on = st.numSpeakers === n;
+              return (
+                <Tap key={n} hapticKind="select" onPress={() => update({ numSpeakers: n })} style={[s.center, { height: 38, minWidth: 44, paddingHorizontal: 12, borderRadius: 19, backgroundColor: on ? t.accent : t.fill }]}>
+                  <T v="subhead" c={on ? '#fff' : t.label} style={{ fontWeight: '600' }}>
+                    {n === 0 ? 'Demander' : n}
+                  </T>
+                </Tap>
+              );
+            })}
+          </View>
+        </Group>
 
-        {s.numSpeakers === 0 ? (
-          <Section title="Séparation des voix (mode auto)">
-            <Row>
-              <Chip label="Moins de voix" active={s.sensitivity === 'fewer'} onPress={() => update({ sensitivity: 'fewer' })} />
-              <Chip label="Normal" active={s.sensitivity === 'normal'} onPress={() => update({ sensitivity: 'normal' })} />
-              <Chip label="Plus de voix" active={s.sensitivity === 'more'} onPress={() => update({ sensitivity: 'more' })} />
-            </Row>
-            <Text style={st.help}>
-              Une même personne est découpée en plusieurs voix ? Choisissez « Moins de voix ». Deux personnes sont confondues ?
-              Choisissez « Plus de voix ».
-            </Text>
-          </Section>
-        ) : null}
+        <Group header="Séparation des voix (mode automatique)" footer="Une même personne apparaît en plusieurs voix ? Choisissez « Regrouper davantage ». Deux personnes confondues ? « Séparer davantage ».">
+          <Row title="Regrouper davantage" checked={st.sensitivity === 'fewer'} onPress={() => update({ sensitivity: 'fewer' })} />
+          <Row title="Équilibré" checked={st.sensitivity === 'normal'} onPress={() => update({ sensitivity: 'normal' })} />
+          <Row title="Séparer davantage" checked={st.sensitivity === 'more'} onPress={() => update({ sensitivity: 'more' })} />
+        </Group>
 
-        <Text style={[st.help, { textAlign: 'center', marginTop: 10 }]}>Resona 0.1.1 · moteur sherpa-onnx</Text>
+        <View style={{ alignItems: 'center', gap: 4 }}>
+          <T v="footnote" c={t.label2}>
+            Resona 0.2.0
+          </T>
+          <T v="caption" c={t.label3}>
+            Reconnaissance des voix et transcription sur l'appareil
+          </T>
+        </View>
       </ScrollView>
     </View>
   );
 }
 
+function Field({ value, placeholder, onChange, secure }: { value: string; placeholder: string; onChange: (v: string) => void; secure?: boolean }) {
+  const t = useTheme();
+  return (
+    <TextInput
+      value={value}
+      onChangeText={onChange}
+      placeholder={placeholder}
+      placeholderTextColor={t.label3}
+      autoCapitalize="none"
+      autoCorrect={false}
+      secureTextEntry={secure}
+      selectionColor={t.accent}
+      style={{ color: t.label, fontSize: 17, paddingHorizontal: 16, paddingVertical: 14 }}
+    />
+  );
+}
+
 function PackRow({ pack }: { pack: ModelPack }) {
+  const t = useTheme();
   const [p, setP] = useState<PackProgress | null>(null);
   const refresh = useCallback(() => {
     packProgress(pack).then(setP);
   }, [pack]);
   useEffect(refresh, [refresh]);
-  useInterval(refresh, p?.downloading ? 500 : null);
+  useInterval(refresh, p?.downloading ? 400 : null);
 
+  const pct = p && p.total ? p.bytes / p.total : 0;
   return (
-    <View style={st.pack}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <View style={{ flex: 1 }}>
-          <Text style={st.packTitle}>{pack.label}</Text>
-          <Text style={st.help}>
-            {pack.description} · {formatBytes(packSize(pack))}
-          </Text>
+    <View style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
+      <View style={[s.row, { alignItems: 'center', gap: 12 }]}>
+        <View style={[s.center, { width: 30, height: 30, borderRadius: 7, backgroundColor: pack.id === 'voices' ? '#FF9500' : '#5856D6' }]}>
+          <Icon name={pack.id === 'voices' ? 'people' : 'doc'} size={18} color="#fff" />
         </View>
-        {p?.installed ? <Text style={{ color: C.ok, fontWeight: '700' }}>✓ Installé</Text> : null}
-      </View>
-      {p && !p.installed ? (
-        p.downloading ? (
-          <View style={{ marginTop: 12, gap: 6 }}>
-            <ProgressBar value={p.total ? p.bytes / p.total : 0} />
-            <Text style={st.help}>
-              {formatBytes(p.bytes)} / {formatBytes(p.total)}
-            </Text>
-          </View>
+        <View style={{ flex: 1 }}>
+          <T v="body">{pack.label}</T>
+          <T v="footnote" c={p?.error ? t.red : t.label2} style={{ marginTop: 2 }}>
+            {p?.error ? `Erreur : ${p.error}` : p?.downloading ? `${formatBytes(p.bytes)} sur ${formatBytes(p.total)}` : formatBytes(packSize(pack))}
+          </T>
+        </View>
+        {p?.installed ? (
+          <Tap
+            onPress={() =>
+              Alert.alert('Supprimer le modèle ?', 'Il faudra le retélécharger pour analyser.', [
+                { text: 'Annuler', style: 'cancel' },
+                { text: 'Supprimer', style: 'destructive', onPress: async () => { await deletePack(pack); refresh(); } },
+              ])
+            }
+            style={[s.row, { alignItems: 'center', gap: 4 }]}>
+            <Icon name="check" size={16} color={t.green} />
+            <T v="subhead" c={t.green} style={{ fontWeight: '600' }}>
+              Installé
+            </T>
+          </Tap>
+        ) : p?.downloading ? (
+          <T v="subhead" c={t.accent} style={{ fontWeight: '600', fontVariant: ['tabular-nums'] }}>
+            {Math.round(pct * 100)} %
+          </T>
         ) : (
-          <View style={{ marginTop: 12 }}>
-            {p.error ? <Text style={[st.help, { color: C.rec, marginBottom: 8 }]}>Erreur : {p.error}</Text> : null}
-            <Button
-              label={p.error ? 'Réessayer' : 'Télécharger'}
-              onPress={async () => {
-                await startPackDownload(pack);
-                setTimeout(refresh, 300);
-              }}
-            />
-          </View>
-        )
-      ) : null}
-      {p?.installed ? (
-        <Button
-          label="Supprimer"
-          kind="ghost"
-          style={{ marginTop: 12, paddingVertical: 9 }}
-          onPress={() =>
-            Alert.alert('Supprimer le modèle ?', 'Il faudra le retélécharger pour analyser.', [
-              { text: 'Annuler', style: 'cancel' },
-              {
-                text: 'Supprimer',
-                style: 'destructive',
-                onPress: async () => {
-                  await deletePack(pack);
-                  refresh();
-                },
-              },
-            ])
-          }
-        />
+          <Button
+            label={p?.error ? 'Réessayer' : 'Obtenir'}
+            kind="tinted"
+            small
+            onPress={async () => {
+              haptic('tap');
+              await startPackDownload(pack);
+              setTimeout(refresh, 300);
+            }}
+          />
+        )}
+      </View>
+      {p?.downloading ? (
+        <View style={{ height: 4, borderRadius: 2, backgroundColor: t.fill, marginTop: 12, marginLeft: 42, overflow: 'hidden' }}>
+          <View style={{ width: `${Math.max(2, pct * 100)}%`, height: 4, borderRadius: 2, backgroundColor: t.accent }} />
+        </View>
       ) : null}
     </View>
   );
 }
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <View style={{ gap: 10 }}>
-      <Text style={st.section}>{title}</Text>
-      {children}
-    </View>
-  );
-}
-
-function Row({ children }: { children: React.ReactNode }) {
-  return <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>{children}</View>;
-}
-
-const st = StyleSheet.create({
-  section: { color: C.sub, fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6 },
-  help: { color: C.dim, fontSize: 13, lineHeight: 19, marginTop: 2 },
-  pack: { backgroundColor: C.card, borderRadius: 16, padding: 14 },
-  packTitle: { color: C.text, fontWeight: '700', fontSize: 15 },
-  input: {
-    backgroundColor: C.card,
-    color: C.text,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 15,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-});
