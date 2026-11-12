@@ -88,7 +88,9 @@ export function RecorderScreen({ id, onDone, onBack }: { id: string; onDone: (id
             onEndEditing={e => saveTitle(e.nativeEvent.text)}
             style={[st.title, { color: t.label }]}
             selectionColor={t.accent}
-            multiline={false}
+            multiline
+            submitBehavior="blurAndSubmit"
+            returnKeyType="done"
           />
         ) : null}
         <View style={[s.row, { alignItems: 'center', gap: 8, marginTop: 6 }]}>

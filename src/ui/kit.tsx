@@ -340,7 +340,7 @@ export function Sheet({ visible, onClose, title, children }: { visible: boolean;
         </Animated.View>
         <Animated.View
           style={{
-            backgroundColor: t.dark ? '#1C1C1E' : '#F2F2F7',
+            backgroundColor: t.dark ? '#0F0F11' : '#F2F2F7',
             borderTopLeftRadius: 14,
             borderTopRightRadius: 14,
             paddingBottom: insets.bottom + 16,
