@@ -21,6 +21,11 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    // Le processus « :analysis » (ProcessingService) n'a pas besoin de React Native.
+    if (currentProcessName().endsWith(":analysis")) return
     loadReactNative(this)
   }
+
+  private fun currentProcessName(): String =
+    try { java.io.File("/proc/self/cmdline").readText().trim { it <= ' ' } } catch (_: Throwable) { "" }
 }

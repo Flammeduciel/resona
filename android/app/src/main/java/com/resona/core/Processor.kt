@@ -73,14 +73,17 @@ class Processor(
       minDurationOff = 0.5f,
     )
     val diar = OfflineSpeakerDiarization(config = diarConfig)
+    // Note : on n'utilise PAS processWithCallback. Son pont JNI cherche une méthode « invoke » que
+    // les lambdas Kotlin n'exposent pas : NoSuchMethodError côté natif, ce qui fait planter l'app.
+    // On affiche une progression estimée pendant le calcul.
+    val ticker = progressTicker("Reconnaissance des voix", 0.0, diarShare * 0.95, estimatedSec = duration * 0.12f)
     val raw = try {
-      diar.processWithCallback(samples, { done: Int, total: Int, _: Long ->
-        if (total > 0) onProgress("Reconnaissance des voix", diarShare * done / total)
-        if (isCancelled()) 1 else 0
-      }, 0L)
+      diar.process(samples)
     } finally {
+      ticker.interrupt()
       diar.release()
     }
+    onProgress("Reconnaissance des voix", diarShare)
     checkCancel()
 
     var turns = raw.sortedBy { it.start }.map { Turn(it.start, it.end, it.speaker) }
@@ -128,6 +131,25 @@ class Processor(
 
     writeResult(turns, duration, withAsr)
     onProgress("Terminé", 1.0)
+  }
+
+  /** Fait avancer la barre de progression pendant un calcul natif qui ne donne pas de nouvelles. */
+  private fun progressTicker(stage: String, from: Double, to: Double, estimatedSec: Float): Thread {
+    val t = Thread {
+      val startMs = System.currentTimeMillis()
+      val est = maxOf(2.0, estimatedSec.toDouble()) * 1000
+      try {
+        while (true) {
+          val x = (System.currentTimeMillis() - startMs) / est
+          // courbe qui tend vers 1 sans jamais l'atteindre
+          onProgress(stage, from + (to - from) * (1 - Math.exp(-2 * x)))
+          Thread.sleep(500)
+        }
+      } catch (_: InterruptedException) {}
+    }
+    t.isDaemon = true
+    t.start()
+    return t
   }
 
   private fun checkCancel() { if (isCancelled()) throw CancelledException() }

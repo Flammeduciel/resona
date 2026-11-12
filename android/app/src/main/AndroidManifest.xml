@@ -36,6 +36,7 @@
         android:foregroundServiceType="microphone" />
       <service
         android:name=".core.ProcessingService"
+        android:process=":analysis"
         android:exported="false"
         android:foregroundServiceType="dataSync" />
     </application>

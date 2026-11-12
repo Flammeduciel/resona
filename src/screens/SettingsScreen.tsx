@@ -137,7 +137,7 @@ export function SettingsScreen({ onBack }: { onBack: () => void }) {
           </Section>
         ) : null}
 
-        <Text style={[st.help, { textAlign: 'center', marginTop: 10 }]}>Resona 0.1.0 · moteur sherpa-onnx</Text>
+        <Text style={[st.help, { textAlign: 'center', marginTop: 10 }]}>Resona 0.1.1 · moteur sherpa-onnx</Text>
       </ScrollView>
     </View>
   );

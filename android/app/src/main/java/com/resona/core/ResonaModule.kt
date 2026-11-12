@@ -173,18 +173,19 @@ class ResonaModule(private val ctx: ReactApplicationContext) : ReactContextBaseJ
 
   @ReactMethod
   fun getProcessingState(promise: Promise) {
+    val st = ProcessingService.readState(ctx)
     val m = Arguments.createMap()
-    m.putBoolean("running", ProcessingService.running)
-    m.putString("id", ProcessingService.currentId)
-    m.putString("stage", ProcessingService.stage)
-    m.putDouble("progress", ProcessingService.progress)
-    m.putString("error", ProcessingService.error)
-    m.putString("finishedId", ProcessingService.finishedId)
+    m.putBoolean("running", st.running)
+    m.putString("id", st.id)
+    m.putString("stage", st.stage)
+    m.putDouble("progress", st.progress)
+    m.putString("error", st.error)
+    m.putString("finishedId", st.finishedId)
     promise.resolve(m)
   }
 
   @ReactMethod
-  fun cancelProcessing(promise: Promise) { ProcessingService.cancelRequested = true; promise.resolve(true) }
+  fun cancelProcessing(promise: Promise) { ProcessingService.requestCancel(ctx); promise.resolve(true) }
 
   // ---------- Lecture audio ----------
 
