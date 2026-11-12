@@ -1,0 +1,7 @@
+sherpa-onnx>=2.0.1
+fastapi
+uvicorn
+python-multipart
+soundfile
+scipy
+numpy
